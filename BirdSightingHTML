@@ -9,10 +9,10 @@
 <meta http-equiv="X-UA-Compatible" content="IE=EDGE" />
 
 
-<meta name="author" content="James Wilner, jwil598, 545513879" />
+<meta name="author" content="James Wilner" />
 
 
-<title>Assignment 4</title>
+<title>Bird Sighting Classification</title>
 
 <script>// Pandoc 2.9 adds attributes on both header and div. We remove the former (to
 // be compatible with the behavior of Pandoc < 2.8).
