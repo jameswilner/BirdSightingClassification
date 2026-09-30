@@ -1,0 +1,267 @@
+---
+title: "Assignment 4"
+author: "James Wilner, jwil598, 545513879"
+output: html_document
+---
+
+# Packages
+
+```{r}
+library(xgboost)
+library(tidyverse)
+library(lubridate)
+library(ranger)
+```
+
+# Task 1
+
+# Q1
+
+```{r}
+set.seed(545513879)
+birds.data <- readRDS("nz_birds_tui_bell.rds")
+```
+
+# Q1A
+
+```{r}
+noVariationIndexes <- which(sapply(birds.data, function(x) length(unique(x)) == 1))
+colnames(birds.data[, noVariationIndexes])
+```
+
+The variables above show no variation as they have only a single level. Therefore they won't be helpful predictors and should be removed from the dataframe later.
+
+# Q1B
+
+```{r}
+missing_proportions <- colSums(is.na(birds.data)) / nrow(birds.data)
+fullMissingIndexes <- which(missing_proportions == 1)
+missing_proportions
+colnames(birds.data[, fullMissingIndexes])
+```
+
+The missing_proportions vector shows the proportion of observations that have a value of NA. A value of 1 means the variable has all NA values, and a value of 0 means it has no NA values. The colnames vector above shows all the variables that have all NA values.
+
+# Q1C
+
+There are some latitude and longitude values that don't fit properly in New Zealand boundaries. In our analysis we only want to analyze birds seen in New Zealand so the presence of these observations is a data quality issue. Also the individualCount variable has 1.2% of its values missing, which is a data quality issue and will need to be cleaned up somehow. Additionally a lot of variables just aren't useful for prediction (like how there are multiple different name formats for the same bird), so if these are included as predictors they will "predict" with 100% accuracy, which will be pointless.
+
+# Q2A
+
+```{r}
+cleaned.data <- birds.data[, -noVariationIndexes]
+```
+
+This removes variables with no variation, as they will not be useful for prediction.
+
+# Q2B
+
+```{r}
+cleaned.data <- cleaned.data[, c(4, 8:15)]
+```
+
+This removes variables that contain duplicate information (eg different formats of the same name) or pointless information for prediction (eg user id).
+
+# Q2C
+
+```{r}
+cleaned.data <- cleaned.data[cleaned.data$decimalLongitude > 166 & cleaned.data$decimalLongitude < 179, ]
+cleaned.data <- cleaned.data[cleaned.data$decimalLatitude > -48 & cleaned.data$decimalLatitude < -34, ]
+```
+
+This removes observations that occured outside of new zealands geographical boundaries.
+
+# Q2D
+
+```{r}
+colSums(is.na(cleaned.data)) / nrow(cleaned.data)
+countmedian <- median(na.omit(cleaned.data$individualCount))
+cleaned.data$individualCount[is.na(cleaned.data$individualCount)] <- countmedian
+```
+
+We wanted to find a sensible value to impute into the missing values. The mean seemed like it wouldn't be accurate because there are significant outliers in the individualCount variable. Therefore we used the median as an impute value, which should be more accurate in this scenario.
+
+# Q2E
+
+```{r}
+cleaned.data$isbellbell <- cleaned.data$species == "Anthornis melanura"
+```
+
+This creates a new variable which is TRUE when the species is bellbell and FALSE if the species is tui.
+
+# Task 2
+
+# Q1
+
+```{r}
+bellbell.data <- cleaned.data[cleaned.data$isbellbell == TRUE, ]
+
+ggplot(data = bellbell.data) +
+  geom_bar(aes(x = stateProvince, color = stateProvince, fill = stateProvince)) +
+  labs(title = "Bellbird sightings over New Zealand regions", x = "Region", y = "Number of Bellbirds") +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()
+  )
+
+bellbell.data |>
+  group_by(stateProvince) |>
+  summarise(n = n())
+```
+
+Canterbury has the most recorded bellbird sightings out of all New Zealand regions and Gisborne has the least. However this doesn't necessarily mean that Canterbury has the most bellbirds, as it could have many sightings with lower individual counts, or the people there could be more likely to record sightings. But if we had to predict which New Zealand region had the most bellbirds, Canterbury would be the best guess. Otago, Southland and Wellington are all close behind it in terms of bellbird sightings so we would expect them to all have a decently high presence of bellbirds as well.
+
+# Q2
+
+```{r}
+tui.data <- cleaned.data[cleaned.data$isbellbell == FALSE, ]
+
+ggplot(data = cleaned.data) +
+  geom_boxplot(aes(x = isbellbell, y = log(individualCount))) +
+  labs(title = "Bird counts compared by species", x = "Bird is a bellbird", y = "Logged individual count")
+
+mean(bellbell.data$individualCount)
+mean(tui.data$individualCount)
+
+median(bellbell.data$individualCount)
+median(tui.data$individualCount)
+```
+
+The median individual count for both species are the same so it is unlikely there is a significant difference in the number of birds recorded per encounter between the 2 species. The mean individual count is higher for tuis, but since there is a lot of skew in the data, the median is better to use. The boxplot above shows that the pattern of individual counts is pretty equal across the 2 species, so I wouldn't say there is any significant difference between the 2 species in terms of individual counts.
+
+# Q3
+
+```{r}
+tuiPerMonth <- tui.data |>
+  mutate(year_month = as.Date(paste(year, sprintf("%02d", month), "01", sep = "-"))) |>
+  group_by(year_month) |>
+  summarise(totalBirds = sum(individualCount))
+
+bellbellPerMonth <- bellbell.data |>
+  mutate(year_month = as.Date(paste(year, sprintf("%02d", month), "01", sep = "-"))) |>
+  group_by(year_month) |>
+  summarise(totalBirds = sum(individualCount))
+
+ggplot() +
+  geom_point(data = tuiPerMonth, aes(x = year_month, y = totalBirds, color = "tui")) +
+  geom_point(data = bellbellPerMonth, aes(x = year_month, y = totalBirds, color = "Bellbird")) +
+  labs(x = "Year and month", y = "Birds seen", title = "Bird sightings over time", color = "Bird Type") +
+  scale_color_manual(values = c("tui" = "blue", "Bellbird" = "green")) +
+  scale_x_date(date_labels = "%b %Y")
+
+tuiPerMonth
+bellbellPerMonth
+
+```
+
+There generally seems to be more sightings of tui than bellbirds throughout the past 5 years. Sightings appear to peak at around january every year for both bird types, which could be due to people being outside in nature more during the summer, and therefore being more likely to see and report bird sightings. Sightings are lowest around the middle of the year, which also makes sense as people are often not going out and looking at birds in the middle of winter.
+
+# Task 3
+
+# Q1
+
+```{r}
+bellbellSample <- sample(nrow(bellbell.data), size = 0.7 * nrow(bellbell.data))  
+bellbellTrain <- bellbell.data[bellbellSample, ]      
+bellbellTest <- bellbell.data[-bellbellSample, ]
+
+tuiSample <- sample(nrow(tui.data), size = 0.7 * nrow(tui.data))
+tuiTrain <- tui.data[tuiSample, ]
+tuiTest <- tui.data[-tuiSample, ]
+
+combinedTrain <- rbind(bellbellTrain, tuiTrain)[, 2:10]
+combinedTest <- rbind(bellbellTest, tuiTest)[, 2:10]
+
+table(combinedTrain$isbellbell)/nrow(combinedTrain)
+table(combinedTest$isbellbell)/nrow(combinedTest)
+```
+
+We sample both species seperately, and combine afterwards, in order to maintain the same proportion of tui and bellbell in both training and testing data. We use a 70% to 30% training and testing data split.
+
+# Q2
+
+```{r, cache=TRUE}
+myForest <- ranger(isbellbell ~ .,
+                   data = combinedTrain,
+                   num.trees = 500,
+                   min.node.size = 5,
+                   importance = "impurity"
+                   )
+myForest$variable.importance
+
+pred1 <- predict(myForest, data = combinedTest[, -9], type = "response")
+
+confusion_matrix1 <- table(Actual = combinedTest$isbellbell, Predicted = pred1$predictions)
+confusion_matrix1
+
+correct_proportion1 <- (confusion_matrix1[1, 1] + confusion_matrix1[2, 2]) / sum(confusion_matrix1)
+correct_proportion1
+
+prediction_error1 <- 1 - correct_proportion1
+prediction_error1
+```
+
+This model has a classification rate of 78.6% and a prediction error rate of 21.4%. This means that the model is wrong approximately 21.4% of the time when classifying unseen observations as tui or bellbird.
+
+# Q3
+
+```{r, cache=TRUE}
+train_X <- model.matrix(isbellbell ~ ., data = combinedTrain)
+xgb.cv(data = train_X,
+       label = as.numeric(as.factor(combinedTrain$isbellbell)) - 1,
+       num_class = 2,
+       nrounds = 50,
+       eta =  0.1,
+       nfold = 10,
+       early_stopping_rounds = 3)
+myXgboost <- xgboost(data = train_X,
+                     label = as.numeric(as.factor(combinedTrain$isbellbell)) - 1,
+                     num_class = 2,
+                     nrounds = 50,
+                     eta =  0.1)
+xgb.importance(model = myXgboost)
+test_X <- model.matrix(isbellbell ~., data = combinedTest)
+
+pred2  <- predict(myXgboost, test_X)
+
+confusion_matrix2 <- table(Actual = combinedTest$isbellbell, Predicted = pred2)
+confusion_matrix2
+
+correct_proportion2 <- (confusion_matrix2[1, 1] + confusion_matrix2[2, 2]) / sum(confusion_matrix2)
+correct_proportion2
+
+prediction_error2 <- 1 - correct_proportion2
+prediction_error2
+
+```
+
+This model has a classification rate of 76.1% and a prediction error rate of 23.9%. This is only slightly worse than the random forest model. If I had to pick a model to use, I would use the random forest model, but it is not a significant difference so both models are pretty similar in classification.
+
+# Task 4
+
+# Q1
+
+```{r, cache = TRUE}
+myForest$variable.importance
+xgb.importance(model = myXgboost)
+
+ggplot(data = cleaned.data) +
+  geom_jitter(aes(x = decimalLongitude, y = decimalLatitude, color = isbellbell)) +
+  labs(title = "Bird type spotted compared to coordinates", x = "Longitude", y = "Latitude")
+
+individualCountData <- cleaned.data |>
+  group_by(isbellbell, individualCount) |>
+  summarise(n = n())
+
+ggplot(data = individualCountData) +
+  geom_point(aes(x = individualCount, y = log(n), color = isbellbell)) +
+  labs(title = "Number of observations for each quantity of birds seen",x = "Birds seen", y = "Logged number of observations")
+```
+
+The first plot shows the latitude and longitude of where bird sightings occured, color coded depending on species. We can see that there appears to be more sightings of tui in the north island, and more sightings of bellbirds in the south island. The second plot shows the count of birds observed, the logged amount of how many observations involved this many birds, and is color coded by species. We can't really see any pattern from this, apart from maybe tuis having more outliers in terms of large groups being spotted.
+
+# Q2
+
+There are multiple potential reasons why this could have occured. One reason is self-selection bias, where people are more likely to record bellbird sightings, as they are rarer. People may not think seeing tuis is important, so may not bother to record sightings. This skews the proportion, and adds bias to the model, as the proportion of recorded observations does not match the proportion of birds actually living in the area.
+
+Another reason could be that bellbirds are more comfortable around people, noisier, and generally stand out more. This leads to more people sighting them, or noting them as worth recording. However this causes bias because it can lead to an inaccurate representation of the proportion of each bird, as only the seen ones are recorded. For example there could be the same amount of bellbirds and tui in an area, but 50% of the bellbirds are seen but only 20% of the tuis, which can make it seem like there is more bellbirds than tuis living in this area.
